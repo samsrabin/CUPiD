@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 EARTHSTAT_RES_TO_PLOT = "f09"
 
 
-def _setup_fig(opts):
+def setup_fig(opts):
     fig_opts = {}
     n_crops_to_include = len(opts["crops_to_include"])
     if 5 <= n_crops_to_include <= 6:
@@ -24,10 +24,10 @@ def _setup_fig(opts):
     return fig_opts, fig, axes
 
 
-def _plot_clm_cases(case_list, opts, var_details, crop):
+def _plot_clm_cases(case_list, opts, var_details, crop, use_earthstat_area):
     for c, case in enumerate(case_list):
 
-        crop_data_ts = var_details["function"](crop, case)
+        crop_data_ts = var_details["function"](crop, case, use_earthstat_area)
 
         # Plot data
         crop_data_ts *= var_details["conversion_factor"]
@@ -47,7 +47,9 @@ def _plot_clm_cases(case_list, opts, var_details, crop):
         crop_data_ts.plot(linestyle=linestyle)
 
 
-def _get_clm_yield(crop, case):
+def _get_clm_yield(crop, case, use_earthstat_area):
+    if use_earthstat_area:
+        raise NotImplementedError("Calculate CLM production as if with EarthStat area")
     # Do NOT use crop_cft_yield here, because you need to sum across cft and pft before
     # doing the division
     crop_prod_ts = case.cft_ds["crop_cft_prod"].sel(crop=crop).sum(dim=["cft", "pft"])
@@ -56,19 +58,27 @@ def _get_clm_yield(crop, case):
     return crop_yield_ts
 
 
-def _get_clm_prod(crop, case):
+def _get_clm_prod(crop, case, use_earthstat_area):
+    if use_earthstat_area:
+        raise NotImplementedError("Calculate CLM production as if with EarthStat area")
     return case.cft_ds["crop_cft_prod"].sel(crop=crop).sum(dim=["cft", "pft"])
 
 
-def _get_clm_area(crop, case):
-    return case.cft_ds["crop_cft_area"].sel(crop=crop).sum(dim=["cft", "pft"])
+def _get_clm_area(crop, case, use_earthstat_area):
+    if use_earthstat_area:
+        da = case.cft_ds["crop_area_es"].sel(crop=crop)
+    else:
+        da = case.cft_ds["crop_cft_area"].sel(crop=crop)
+    return da.sum(dim=[dim for dim in da.dims if dim != "time"])
 
 
-def _finish_fig(opts, fig_opts, fig):
+def finish_fig(opts, fig_opts, fig, *, incl_obs=True):
     plt.subplots_adjust(wspace=fig_opts["wspace"], hspace=fig_opts["hspace"])
+    labels = opts["case_legend_list"].copy()
+    if incl_obs:
+        labels += ["FAOSTAT", f"EarthStat {EARTHSTAT_RES_TO_PLOT}"]
     fig.legend(
-        labels=opts["case_legend_list"]
-        + ["FAOSTAT", f"EarthStat {EARTHSTAT_RES_TO_PLOT}"],
+        labels=labels,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.96),
         ncol=3,
@@ -143,13 +153,13 @@ def _get_var_details(which, fao_data_world):
     return var_details
 
 
-def main(which, earthstat_data, case_list, fao_data, opts):
+def main(which, earthstat_data, case_list, fao_data, opts, *, use_earthstat_area=False):
     """
     For making timeseries figures of CLM crop outputs
     """
 
     # Get figure layout info
-    fig_opts, fig, axes = _setup_fig(opts)
+    fig_opts, fig, axes = setup_fig(opts)
 
     # This .copy() prevents spooky side effects from operational persistence
     fao_data_world = fao_data.copy().query("Area == 'World'")
@@ -160,12 +170,16 @@ def main(which, earthstat_data, case_list, fao_data, opts):
     var_details = _get_var_details(which, fao_data_world)
     fig_opts["title"] = "Global " + var_details["da_name"].lower()
 
+    # Modify figure options
+    if use_earthstat_area:
+        fig_opts["title"] += " (if CLM used EarthStat areas)"
+
     for i, crop in enumerate(opts["crops_to_include"]):
         ax = axes.ravel()[i]
         plt.sca(ax)
 
         # Plot case data
-        _plot_clm_cases(case_list, opts, var_details, crop)
+        _plot_clm_cases(case_list, opts, var_details, crop, use_earthstat_area)
 
         # Plot FAOSTAT data
         _plot_faostat(
@@ -183,4 +197,4 @@ def main(which, earthstat_data, case_list, fao_data, opts):
         ax.set_title(crop)
         plt.xlabel("")
 
-    _finish_fig(opts, fig_opts, fig)
+    finish_fig(opts, fig_opts, fig)
