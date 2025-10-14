@@ -7,7 +7,6 @@ import os
 from time import time
 
 import numpy as np
-import xarray as xr
 
 
 class CaseList(list):
@@ -21,14 +20,17 @@ class CaseList(list):
         CropCase,
         identify_resolution,
         opts,
-        **kwargs,
     ):
         # Initialize as a normal list...
-        super().__init__(*args, **kwargs)
+        super().__init__(*args)
         # ...And then add all the extra stuff
 
         # Define extra variables
         self.names = opts["case_name_list"]
+
+        # Get map figure layout info
+        self.mapfig_layout = {}
+        self._get_mapfig_layout()
 
         # Import cases
         self._import_cases(
@@ -36,11 +38,7 @@ class CaseList(list):
             identify_resolution,
             opts,
         )
-        self.resolutions = {case.cft_ds.attrs["resolution"].name for case in self}
-
-        # Get map figure layout info
-        self.mapfig_layout = {}
-        self._get_mapfig_layout()
+        self.resolutions = {case.cft_ds.attrs["resolution"] for case in self}
 
     def _import_cases(
         self,
@@ -66,60 +64,31 @@ class CaseList(list):
                     opts["start_year"],
                     opts["end_year"],
                     verbose=opts["verbose"],
+                    force_new_cft_ds_file=opts["force_new_cft_ds_file"],
                 ),
             )
 
-            if opts["dev_mode"]:
-                start_load = time()
-                print("Loading...")
-                self[-1].cft_ds.load()
-                end_load = time()
-                print(f"Loading took {int(end_load - start_load)} s")
-
-            # Get gridcell area
-            ds = self[-1].cft_ds
-            area_p = self._get_area_p(ds)
-            ds["pfts1d_gridcellarea"] = xr.DataArray(
-                data=area_p,
-                coords={"pft": ds["pft"].values},
-                dims=["pft"],
-            )
-
             # Get resolution
-            ds.attrs["resolution"] = identify_resolution(ds)
+            self[-1].cft_ds.attrs["resolution"] = identify_resolution(
+                self[-1].cft_ds,
+            ).name
 
         print("Done.")
         if opts["verbose"]:
             end = time()
             print(f"Importing took {int(end - start)} s")
 
-    def _get_area_p(self, ds):
-        """
-        Get area of gridcell that is parent of each pft (patch)
-        """
-        area_g = []
-        for i, lon in enumerate(ds["grid1d_lon"].values):
-            lat = ds["grid1d_lat"].values[i]
-            area_g.append(ds["area"].sel(lat=lat, lon=lon))
-        area_g = np.array(area_g)
-        area_p = []
-        for i in ds["pfts1d_gi"].isel(cft=0).values:
-            area_p.append(area_g[int(i) - 1])
-        area_p = np.array(area_p)
-        return area_p
-
     def _get_mapfig_layout(self):
         """
         Get map figure layout info
         """
         n_cases = len(self.names)
-        if 3 <= n_cases <= 4:
-            self.mapfig_layout["nrows"] = 2
-            self.mapfig_layout["subplots_adjust_colorbar_top"] = 0.95
-            self.mapfig_layout["subplots_adjust_colorbar_bottom"] = 0.2
-            self.mapfig_layout["cbar_ax_rect"] = (0.2, 0.15, 0.6, 0.03)
-        else:
-            raise RuntimeError(f"Specify figure layout for N_cases=={n_cases}")
+
+        self.mapfig_layout["nrows"] = int(np.ceil(n_cases / 2))
+        self.mapfig_layout["subplots_adjust_colorbar_top"] = 0.95
+        self.mapfig_layout["subplots_adjust_colorbar_bottom"] = 0.2
+        self.mapfig_layout["cbar_ax_rect"] = (0.2, 0.15, 0.6, 0.03)
+
         height = 3.75 * self.mapfig_layout["nrows"]
         width = 15
         self.mapfig_layout["figsize"] = (width, height)

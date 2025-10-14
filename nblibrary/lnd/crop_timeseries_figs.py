@@ -3,6 +3,7 @@ For making timeseries figures of CLM crop outputs
 """
 from __future__ import annotations
 
+from earthstat import align_time
 from matplotlib import pyplot as plt
 
 EARTHSTAT_RES_TO_PLOT = "f09"
@@ -43,25 +44,36 @@ def _plot_clm_cases(case_list, opts, var_details, crop, use_earthstat_area):
         else:
             linestyle = "-"
 
-            # Plot
+        # Plot
+        if use_earthstat_area:
+            crop_data_ts = crop_data_ts.sel(time=case.cft_ds["earthstat_time"])
         crop_data_ts.plot(linestyle=linestyle)
 
 
 def _get_clm_yield(crop, case, use_earthstat_area):
     if use_earthstat_area:
-        raise NotImplementedError("Calculate CLM production as if with EarthStat area")
-    # Do NOT use crop_cft_yield here, because you need to sum across cft and pft before
-    # doing the division
-    crop_prod_ts = case.cft_ds["crop_cft_prod"].sel(crop=crop).sum(dim=["cft", "pft"])
-    crop_area_ts = case.cft_ds["crop_cft_area"].sel(crop=crop).sum(dim=["cft", "pft"])
+        this_area = "crop_area_es"
+        this_prod = "crop_prod_es"
+    else:
+        this_area = "crop_cft_area"
+        this_prod = "crop_cft_prod"
+
+    da_prod = case.cft_ds[this_prod].sel(crop=crop)
+    da_area = case.cft_ds[this_area].sel(crop=crop)
+    crop_prod_ts = da_prod.sum(dim=[dim for dim in da_prod.dims if dim != "time"])
+    crop_area_ts = da_area.sum(dim=[dim for dim in da_area.dims if dim != "time"])
     crop_yield_ts = crop_prod_ts / crop_area_ts
+
     return crop_yield_ts
 
 
 def _get_clm_prod(crop, case, use_earthstat_area):
     if use_earthstat_area:
-        raise NotImplementedError("Calculate CLM production as if with EarthStat area")
-    return case.cft_ds["crop_cft_prod"].sel(crop=crop).sum(dim=["cft", "pft"])
+        this_var = "crop_prod_es"
+    else:
+        this_var = "crop_cft_prod"
+    da = case.cft_ds[this_var].sel(crop=crop)
+    return da.sum(dim=[dim for dim in da.dims if dim != "time"])
 
 
 def _get_clm_area(crop, case, use_earthstat_area):
@@ -102,7 +114,7 @@ def _plot_faostat(fao_yield_world, crop, ax, time_da, ctsm_units):
     )
 
 
-def _plot_earthstat(which, earthstat_data, crop, ax):
+def _plot_earthstat(which, earthstat_data, crop, ax, target_time):
     if which == "yield":
         earthstat_prod = earthstat_data[EARTHSTAT_RES_TO_PLOT].get_data("prod", crop)
         earthstat_area = earthstat_data[EARTHSTAT_RES_TO_PLOT].get_data("area", crop)
@@ -116,6 +128,9 @@ def _plot_earthstat(which, earthstat_data, crop, ax):
         if earthstat_var is None:
             return
         earthstat_var = earthstat_var.sum(dim=["lat", "lon"])
+
+    # Align EarthStat data with CLM time axis
+    earthstat_var = align_time(earthstat_var, target_time)
 
     ax.plot(
         earthstat_var["time"],
@@ -191,7 +206,7 @@ def main(which, earthstat_data, case_list, fao_data, opts, *, use_earthstat_area
         )
 
         # Plot EarthStat data
-        _plot_earthstat(which, earthstat_data, crop, ax)
+        _plot_earthstat(which, earthstat_data, crop, ax, case_list[0].cft_ds["time"])
 
         # Finish plot
         ax.set_title(crop)

@@ -15,10 +15,14 @@ def align_time(da_to_align, target_time):
     the CLM outputs. If you don't do this, you will get all NaNs when you try to assign something
     from EarthStat to the CLM Dataset.
     """
-    first_year = min(target_time.values).year
-    last_year = max(target_time.values).year
+
+    # Align EarthStat with CLM axis
+    orig_time = da_to_align["time"]
+    first_year = min(orig_time.values).year
+    last_year = max(orig_time.values).year
     this_slice = slice(f"{first_year}-01-01", f"{last_year}-12-31")
     new_time_coord = target_time.sel(time=this_slice)
+
     return da_to_align.assign_coords({"time": new_time_coord})
 
 
@@ -30,8 +34,17 @@ def check_dim_alignment(earthstat_ds, clm_ds):
     if "crop" not in earthstat_ds.coords:
         earthstat_ds = earthstat_ds.assign_coords({"crop": clm_ds["crop"]})
 
+    # Align time coordinates
+    earthstat_ds = align_time(earthstat_ds, clm_ds["time"])
+
     for dim in earthstat_ds.dims:
         if not earthstat_ds[dim].equals(clm_ds[dim]):
+            # Special handling for time: It's okay for CLM to have more timesteps than EarthStat,
+            # but every timestep in EarthStat needs to be in CLM.
+            if dim == "time":
+                if all(x in clm_ds[dim].values for x in earthstat_ds[dim].values):
+                    continue
+
             raise RuntimeError(f"Misalignment in {dim}")
 
     return earthstat_ds
@@ -115,7 +128,6 @@ class EarthStat:
         self,
         earthstat_dir,
         sim_resolutions,
-        target_time,
         opts,
     ):
         # Define variables
@@ -126,7 +138,7 @@ class EarthStat:
         self._get_crop_list(earthstat_dir, opts["crops_to_include"])
 
         # Import EarthStat maps
-        self._import_data(earthstat_dir, sim_resolutions, target_time, opts)
+        self._import_data(earthstat_dir, sim_resolutions, opts)
 
     def __getitem__(self, key):
         """instance[key] syntax should return corresponding value in data dict"""
@@ -176,7 +188,7 @@ class EarthStat:
             if crop not in self.crops:
                 print(f"WARNING: {crop} not found in self.crops")
 
-    def _import_data(self, earthstat_dir, sim_resolutions, target_time, opts):
+    def _import_data(self, earthstat_dir, sim_resolutions, opts):
         """
         Import EarthStat maps corresponding to simulated CLM resolutions
         """
@@ -192,9 +204,6 @@ class EarthStat:
             start_year = opts["start_year"]
             end_year = opts["end_year"]
             ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
-
-            # Align time
-            ds = align_time(ds, target_time)
 
             # Save as EarthStatDataset, which has more functionality
             esd = EarthStatDataset(ds, self.crops)
