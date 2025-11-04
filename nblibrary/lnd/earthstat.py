@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 
 import xarray as xr
-from plotting_utils import cut_off_antarctica
 
 
 def align_time(da_to_align, target_time):
@@ -22,6 +21,12 @@ def align_time(da_to_align, target_time):
     last_year = max(orig_time.values).year
     this_slice = slice(f"{first_year}-01-01", f"{last_year}-12-31")
     new_time_coord = target_time.sel(time=this_slice)
+
+    # Slice EarthStat to match CLM time span
+    first_year_target = min(target_time.values).year
+    last_year_target = max(target_time.values).year
+    this_slice = slice(f"{first_year_target}-01-01", f"{last_year_target}-12-31")
+    da_to_align = da_to_align.sel(time=this_slice)
 
     return da_to_align.assign_coords({"time": new_time_coord})
 
@@ -114,7 +119,6 @@ class EarthStatDataset(xr.Dataset):
         # Actually get the map
         data_obs = self.get_data(which, crop)
         map_obs = data_obs.mean(dim="time")
-        map_obs = cut_off_antarctica(map_obs)
 
         return map_obs
 
@@ -150,7 +154,7 @@ class EarthStat:
 
     def __print__(self):
         print(
-            f"Dict containing Datasets for the following resolutions: {','.join(self._data.keys())}",
+            f"Dict with Datasets for the following resolutions: {','.join(self._data.keys())}",
         )
 
     def _get_crop_list(self, earthstat_dir, crops_to_include):

@@ -55,8 +55,8 @@ def _get_clm_yield(crop, case, use_earthstat_area):
         this_area = "crop_area_es"
         this_prod = "crop_prod_es"
     else:
-        this_area = "crop_cft_area"
-        this_prod = "crop_cft_prod"
+        this_area = "crop_area"
+        this_prod = "crop_prod"
 
     da_prod = case.cft_ds[this_prod].sel(crop=crop)
     da_area = case.cft_ds[this_area].sel(crop=crop)
@@ -71,7 +71,7 @@ def _get_clm_prod(crop, case, use_earthstat_area):
     if use_earthstat_area:
         this_var = "crop_prod_es"
     else:
-        this_var = "crop_cft_prod"
+        this_var = "crop_prod"
     da = case.cft_ds[this_var].sel(crop=crop)
     return da.sum(dim=[dim for dim in da.dims if dim != "time"])
 
@@ -80,7 +80,7 @@ def _get_clm_area(crop, case, use_earthstat_area):
     if use_earthstat_area:
         da = case.cft_ds["crop_area_es"].sel(crop=crop)
     else:
-        da = case.cft_ds["crop_cft_area"].sel(crop=crop)
+        da = case.cft_ds["crop_area"].sel(crop=crop)
     return da.sum(dim=[dim for dim in da.dims if dim != "time"])
 
 
@@ -97,7 +97,6 @@ def finish_fig(opts, fig_opts, fig, *, incl_obs=True):
         bbox_transform=fig.transFigure,
     )
     fig.suptitle(fig_opts["title"], fontsize="x-large", fontweight="bold")
-    plt.show()
 
 
 def _plot_faostat(fao_yield_world, crop, ax, time_da, ctsm_units):
@@ -107,8 +106,17 @@ def _plot_faostat(fao_yield_world, crop, ax, time_da, ctsm_units):
             f"CTSM units ({ctsm_units}) do not match FAOSTAT units ({faostat_units})",
         )
     fao_yield_world_thiscrop = fao_yield_world.query(f"Crop == '{crop}'")
+
+    # Only include dates from time_da that are in the limits of the FAO data
+    fao_years = (
+        fao_yield_world_thiscrop.index.get_level_values("Year").unique().tolist()
+    )
+    fao_start = min(fao_years)
+    fao_end = max(fao_years)
+    time_slice = slice(f"{fao_start}-01-01", f"{fao_end}-12-31")
+
     ax.plot(
-        time_da,
+        time_da.sel(time=time_slice),
         fao_yield_world_thiscrop["Value"].values,
         "-k",
     )
@@ -168,7 +176,16 @@ def _get_var_details(which, fao_data_world):
     return var_details
 
 
-def main(which, earthstat_data, case_list, fao_data, opts, *, use_earthstat_area=False):
+def main(
+    which,
+    earthstat_data,
+    case_list,
+    fao_data,
+    opts,
+    *,
+    use_earthstat_area=False,
+    fig_file=None,
+):
     """
     For making timeseries figures of CLM crop outputs
     """
@@ -213,3 +230,8 @@ def main(which, earthstat_data, case_list, fao_data, opts, *, use_earthstat_area
         plt.xlabel("")
 
     finish_fig(opts, fig_opts, fig)
+    if fig_file is None:
+        plt.show()
+    else:
+        plt.savefig(fig_file, dpi=150)
+        plt.close()
